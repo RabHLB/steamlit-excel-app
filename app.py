@@ -1,10 +1,28 @@
 import streamlit as st
-from openpyxl import load_workbook
+from openpyxl import load_workbook, Workbook
 import pandas as pd
 from datetime import datetime
 
 # Title of the app
-st.title("Excel Data Entry & Viewer")
+st.title("Excel Data Entry & Viewer with Fixed Headers")
+
+# File path for the Excel file
+file_path = "example.xlsx"
+
+# Ensure the Excel file has headers
+headers = ["Column A", "Column B", "Timestamp"]
+try:
+    wb = load_workbook(file_path)
+    ws = wb.active
+    if ws.max_row == 0:  # If the file is empty
+        ws.append(headers)  # Add headers
+        wb.save(file_path)
+except FileNotFoundError:
+    # Create a new workbook if the file doesn't exist
+    wb = Workbook()
+    ws = wb.active
+    ws.append(headers)  # Add headers
+    wb.save(file_path)
 
 # Input fields for data entry
 col_a = st.text_input("Enter value for Column A:")
@@ -12,14 +30,12 @@ col_b = st.text_input("Enter value for Column B:")
 
 # Button to add data to the Excel file
 if st.button("Add to Excel"):
-    file_path = "example.xlsx"  # Path to the Excel file
-
-    # Load the workbook and select the active sheet
     try:
         wb = load_workbook(file_path)
         ws = wb.active
     except FileNotFoundError:
         st.error("The Excel file does not exist. Please create 'example.xlsx' in the directory.")
+        st.stop()
 
     # Find the next empty row
     next_row = ws.max_row + 1
@@ -38,7 +54,7 @@ if st.button("Add to Excel"):
 st.subheader("Current Data in Excel:")
 
 try:
-    df = pd.read_excel("example.xlsx", engine="openpyxl")
+    df = pd.read_excel(file_path, engine="openpyxl")
     st.dataframe(df)
 except FileNotFoundError:
     st.error("The Excel file does not exist. Please create 'example.xlsx' in the directory.")

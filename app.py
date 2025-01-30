@@ -1,70 +1,44 @@
 import streamlit as st
-import streamlit_authenticator as stauth
 from openpyxl import load_workbook
 import pandas as pd
 from datetime import datetime
 
-# Credentials dictionary
-credentials = {
-    "usernames": {
-        "johndoe": {
-            "name": "John Doe",
-            "password": "$2b$12$WDhf5n2M1fe7R2rBBhn7e.jT0kE5umEx608XD7dLFUr55dB8zZk3a",
-            "email": "johndoe@example.com"
-        },
-        "janesmith": {
-            "name": "Jane Smith",
-            "password": "$2b$12$iLipEEh.OarddPx5qXPw1eatZS4TV7CRR1ang2ZkBminzWa8TQNcy",
-            "email": "janesmith@example.com"
-        }
-    }
-}
+# Title of the app
+st.title("Excel Data Entry & Viewer")
 
-# Initialize the authenticator
-authenticator = stauth.Authenticate(
-    credentials=credentials,
-    cookie_name="app_cookie",
-    key="random_key",
-    cookie_expiry_days=1,
-)
+# Input fields for data entry
+col_a = st.text_input("Enter value for Column A:")
+col_b = st.text_input("Enter value for Column B:")
 
-# Debugging output
-st.write("Credentials Dictionary:", credentials)  # Display credentials
-result = authenticator.login(location="main")  # Login attempt
-st.write("Login Function Output:", result)  # Debugging login function
+# Button to add data to the Excel file
+if st.button("Add to Excel"):
+    file_path = "example.xlsx"  # Path to the Excel file
 
-if result:
-    name, authentication_status, username = result
-    if authentication_status:
-        authenticator.logout("Logout", "sidebar")
-        st.sidebar.write(f"Welcome, {name}!")
+    # Load the workbook and select the active sheet
+    try:
+        wb = load_workbook(file_path)
+        ws = wb.active
+    except FileNotFoundError:
+        st.error("The Excel file does not exist. Please create 'example.xlsx' in the directory.")
 
-        st.title("Excel Data Entry & Viewer")
+    # Find the next empty row
+    next_row = ws.max_row + 1
 
-        # Input fields
-        col_a = st.text_input("Enter value for Column A:")
-        col_b = st.text_input("Enter value for Column B:")
+    # Add the user input and timestamp to the Excel file
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ws[f"A{next_row}"] = col_a
+    ws[f"B{next_row}"] = col_b
+    ws[f"C{next_row}"] = timestamp
 
-        if st.button("Add to Excel"):
-            file_path = "example.xlsx"
-            wb = load_workbook(file_path)
-            ws = wb.active
-            next_row = ws.max_row + 1
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            ws[f"A{next_row}"] = col_a
-            ws[f"B{next_row}"] = col_b
-            ws[f"C{next_row}"] = timestamp
-            wb.save(file_path)
-            st.success("Data added successfully!")
+    # Save the updated workbook
+    wb.save(file_path)
+    st.success("Data added successfully!")
 
-        st.subheader("Current Data in Excel:")
-        df = pd.read_excel("example.xlsx", engine="openpyxl")
-        st.dataframe(df)
+# Display the contents of the Excel file
+st.subheader("Current Data in Excel:")
 
-    elif authentication_status == False:
-        st.error("Username/password is incorrect")
-    else:
-        st.warning("Please enter your username and password")
-else:
-    st.error("Login function returned None. Check your credentials and library version.")
-    st.stop()
+try:
+    df = pd.read_excel("example.xlsx", engine="openpyxl")
+    st.dataframe(df)
+except FileNotFoundError:
+    st.error("The Excel file does not exist. Please create 'example.xlsx' in the directory.")

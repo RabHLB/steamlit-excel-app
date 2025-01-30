@@ -4,7 +4,7 @@ from openpyxl import load_workbook
 import pandas as pd
 from datetime import datetime
 
-# Pre-generated hashed passwords with emails
+# Credentials dictionary
 credentials = {
     "usernames": {
         "johndoe": {
@@ -28,9 +28,10 @@ authenticator = stauth.Authenticate(
     cookie_expiry_days=1,
 )
 
-# Login
-result = authenticator.login(location="main")
-st.write("Login Function Output:", result)  # Debugging
+# Debugging output
+st.write("Credentials Dictionary:", credentials)  # Display credentials
+result = authenticator.login(location="main")  # Login attempt
+st.write("Login Function Output:", result)  # Debugging login function
 
 if result:
     name, authentication_status, username = result

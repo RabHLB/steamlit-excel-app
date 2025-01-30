@@ -1,16 +1,25 @@
 import streamlit as st
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 from openpyxl import load_workbook, Workbook
 import pandas as pd
 from datetime import datetime
 
+# Set Streamlit to use full-width mode
+st.set_page_config(layout="wide")
+
 # Title of the app
-st.title("Excel Data Entry & Viewer with Fixed Headers")
+st.title("Excel Data Entry & Viewer with Full-Width Editable Table")
 
 # File path for the Excel file
 file_path = "example.xlsx"
 
 # Ensure the Excel file has headers
-headers = ["Column A", "Column B", "Timestamp"]
+headers = [
+    "Time Stamp", "Account Number", "Account Name",
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+]
+
 try:
     wb = load_workbook(file_path)
     ws = wb.active
@@ -24,37 +33,45 @@ except FileNotFoundError:
     ws.append(headers)  # Add headers
     wb.save(file_path)
 
-# Input fields for data entry
-col_a = st.text_input("Enter value for Column A:")
-col_b = st.text_input("Enter value for Column B:")
-
-# Button to add data to the Excel file
-if st.button("Add to Excel"):
-    try:
-        wb = load_workbook(file_path)
-        ws = wb.active
-    except FileNotFoundError:
-        st.error("The Excel file does not exist. Please create 'example.xlsx' in the directory.")
-        st.stop()
-
-    # Find the next empty row
-    next_row = ws.max_row + 1
-
-    # Add the user input and timestamp to the Excel file
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    ws[f"A{next_row}"] = col_a
-    ws[f"B{next_row}"] = col_b
-    ws[f"C{next_row}"] = timestamp
-
-    # Save the updated workbook
-    wb.save(file_path)
-    st.success("Data added successfully!")
-
-# Display the contents of the Excel file
-st.subheader("Current Data in Excel:")
-
+# Read data from the Excel file
 try:
     df = pd.read_excel(file_path, engine="openpyxl")
-    st.dataframe(df)
 except FileNotFoundError:
-    st.error("The Excel file does not exist. Please create 'example.xlsx' in the directory.")
+    df = pd.DataFrame(columns=headers)  # Create an empty DataFrame with headers
+
+# Editable grid/table with full-width auto-resizing
+st.subheader("Editable Data Table:")
+
+gb = GridOptionsBuilder.from_dataframe(df)
+
+# Enable full-width auto-sizing and resizable columns
+gb.configure_default_column(editable=True, resizable=True)
+gb.configure_grid_options(domLayout='autoHeight', autoSizeColumns=True)
+gb.configure_columns(df.columns, flex=1)  # Make all columns stretch evenly
+
+# Display the grid with full width
+grid_response = AgGrid(
+    df,
+    gridOptions=gb.build(),
+    update_mode=GridUpdateMode.VALUE_CHANGED,
+    fit_columns_on_grid_load=True,
+    allow_unsafe_jscode=True,
+    theme="streamlit",  # Use Streamlit theme
+    height=800,  # Allows more rows to be visible
+)
+
+# Updated DataFrame after editing
+updated_df = grid_response["data"]
+
+# Button to save the data
+if st.button("Save to Excel"):
+    # Add current timestamp for any new rows
+    updated_df["Time Stamp"] = updated_df["Time Stamp"].fillna(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    # Save the DataFrame to the Excel file
+    updated_df.to_excel(file_path, index=False, engine="openpyxl")
+    st.success("Data saved successfully!")
+
+# Display the updated data
+st.subheader("Updated Data in Excel:")
+st.dataframe(updated_df)

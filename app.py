@@ -1,152 +1,235 @@
 import streamlit as st
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 from openpyxl import load_workbook, Workbook
 import pandas as pd
 from datetime import datetime
+import os
+from typing import List, Dict, Optional
+import json
 
-# Set Streamlit to use full-width mode
-st.set_page_config(layout="wide")
 
-# Title of the app
-st.title("Excel Data Entry & Viewer with Change Log & Clear Function")
+class ExcelApp:
+    def __init__(self, file_path: str, headers: List[str]):
+        """
+        Initialize the Excel App
+        Args:
+            file_path (str): Path to the Excel file
+            headers (List[str]): List of column headers
+        """
+        self.file_path = file_path
+        self.headers = headers
+        self.setup_page()
+        self.initialize_excel()
+        self.load_data()
 
-# File path for the Excel file
-file_path = "example.xlsx"
-
-# Define headers for the main sheet
-headers = [
-    "Account Number", "Account Name", "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December"
-]
-
-# Ensure the Excel file has the required sheets
-try:
-    wb = load_workbook(file_path)
-    if "Main" not in wb.sheetnames:
-        ws_main = wb.create_sheet("Main")
-        ws_main.append(headers)  # Add headers
-    if "Log" not in wb.sheetnames:
-        ws_log = wb.create_sheet("Log")
-        ws_log.append(["Timestamp", "Action", "Updated Data"])
-    wb.save(file_path)
-except FileNotFoundError:
-    # Create a new workbook if the file doesn't exist
-    wb = Workbook()
-    ws_main = wb.active
-    ws_main.title = "Main"
-    ws_main.append(headers)  # Add headers
-    ws_log = wb.create_sheet("Log")
-    ws_log.append(["Timestamp", "Action", "Updated Data"])
-    wb.save(file_path)
-
-# Read data from the "Main" sheet
-try:
-    df = pd.read_excel(file_path, sheet_name="Main", engine="openpyxl")
-except FileNotFoundError:
-    df = pd.DataFrame(columns=headers)  # Create an empty DataFrame with headers
-
-# Initialize the table in session state
-if "df" not in st.session_state:
-    st.session_state.df = df.copy()  # Store the DataFrame in session state
-
-# Editable grid/table with full-width auto-resizing
-st.subheader("Editable Data Table:")
-gb = GridOptionsBuilder.from_dataframe(st.session_state.df)
-gb.configure_default_column(editable=True, resizable=True)
-gb.configure_grid_options(
-    domLayout='autoHeight',
-    autoSizeColumns=True,
-    enterMovesDownAfterEdit=True,  # Allows TAB or ENTER to move to the next cell
-    suppressRowTransform=True,  # Prevents unwanted resets
-    singleClickEdit=True,  # Start editing on a single click
-)
-gb.configure_columns(st.session_state.df.columns, flex=1)
-
-# Render the editable table
-grid_response = AgGrid(
-    st.session_state.df,
-    gridOptions=gb.build(),
-    update_mode=GridUpdateMode.VALUE_CHANGED,  # Update only when values change
-    fit_columns_on_grid_load=True,
-    allow_unsafe_jscode=True,
-    theme="streamlit",
-    height=800,
-)
-
-# Process updated data from the grid
-if grid_response and "data" in grid_response:
-    updated_df = pd.DataFrame(grid_response["data"])  # Capture the updated data
-
-    # Validate numeric columns
-    numeric_columns = headers[2:]  # Columns 3 to 14
-    invalid_entries = False
-    for col in numeric_columns:
-        updated_df[col] = updated_df[col].apply(
-            lambda x: x if pd.isna(x) or (str(x).isdigit() or isinstance(x, (int, float))) else "INVALID"
+    def setup_page(self) -> None:
+        """Configure Streamlit page settings"""
+        st.set_page_config(
+            layout="wide",
+            page_title="Excel Data Manager",
+            page_icon="📊"
         )
-        if "INVALID" in updated_df[col].values:
-            invalid_entries = True
+        st.title("Excel Data Entry & Manager")
 
-    if invalid_entries:
-        st.error("Only numbers are allowed in the columns: January to December. Please correct the invalid entries.")
-    else:
-        st.session_state.df = updated_df.copy()  # Save changes to session state
+    def initialize_excel(self) -> None:
+        """Initialize Excel file with required sheets"""
+        try:
+            if not os.path.exists(self.file_path):
+                self.create_new_workbook()
+            else:
+                self.ensure_sheets_exist()
+        except Exception as e:
+            st.error(f"Error initializing Excel file: {str(e)}")
 
-# Add a button to insert a blank row
-if st.button("Add New Row"):
-    new_row = pd.DataFrame([{col: None for col in st.session_state.df.columns}])
-    st.session_state.df = pd.concat([st.session_state.df, new_row], ignore_index=True)
-    # Trigger rerun without using deprecated APIs
-    st.session_state["trigger"] = not st.session_state.get("trigger", False)
+    def create_new_workbook(self) -> None:
+        """Create a new Excel workbook with required sheets"""
+        wb = Workbook()
+        ws_main = wb.active
+        ws_main.title = "Main"
+        ws_main.append(self.headers)
+        ws_log = wb.create_sheet("Log")
+        ws_log.append(["Timestamp", "Action", "User", "Details"])
+        wb.save(self.file_path)
 
+    def ensure_sheets_exist(self) -> None:
+        """Ensure required sheets exist in workbook"""
+        wb = load_workbook(self.file_path)
+        if "Main" not in wb.sheetnames:
+            ws_main = wb.create_sheet("Main")
+            ws_main.append(self.headers)
+        if "Log" not in wb.sheetnames:
+            ws_log = wb.create_sheet("Log")
+            ws_log.append(["Timestamp", "Action", "User", "Details"])
+        wb.save(self.file_path)
 
-if st.button("Save to Excel"):
-    # Validation: Check if the sheet contains valid data
-    if st.session_state.df.empty or st.session_state.df.iloc[:, 1:].isnull().all().all():
-        st.error("Cannot save: The sheet has no valid data! Please enter at least one value.")
-    else:
-        # Ensure no empty rows or cells replace valid data
-        for col in st.session_state.df.columns[1:]:
-            st.session_state.df[col] = st.session_state.df[col].apply(
-                lambda x: x if pd.notna(x) and str(x).strip() != "" else None
-            )
+    def load_data(self) -> None:
+        """Load data from Excel file into session state"""
+        try:
+            df = pd.read_excel(self.file_path, sheet_name="Main", engine="openpyxl")
+            if "df" not in st.session_state:
+                st.session_state.df = df.copy()
+        except Exception as e:
+            st.error(f"Error loading data: {str(e)}")
+            st.session_state.df = pd.DataFrame(columns=self.headers)
 
-        # Save the data from session state
+    def create_grid(self) -> None:
+        """Create and configure the editable data grid"""
+        st.subheader("📝 Data Editor")
+
+        # Use Streamlit's native data editor
+        edited_df = st.data_editor(
+            st.session_state.df,
+            num_rows="dynamic",
+            use_container_width=True,
+            column_config={
+                col: st.column_config.NumberColumn(col, help=f"Enter {col} value")
+                for col in self.headers[2:]  # Configure number columns for months
+            },
+            hide_index=True,
+        )
+
+        if edited_df is not None:
+            st.session_state.df = edited_df.copy()
+
+    def add_new_row(self) -> None:
+        """Add a new empty row to the dataframe"""
+        col1, col2 = st.columns([1, 5])
+        with col1:
+            if st.button("➕ Add Row"):
+                new_row = pd.DataFrame([{col: None for col in st.session_state.df.columns}])
+                st.session_state.df = pd.concat([st.session_state.df, new_row], ignore_index=True)
+                st.rerun()
+
+    def save_data(self) -> None:
+        """Save data to Excel file"""
+        col1, col2 = st.columns([1, 5])
+        with col1:
+            if st.button("💾 Save"):
+                if self.validate_data_for_save():
+                    self.perform_save()
+                    st.success("✅ Data saved successfully!")
+
+    def validate_data_for_save(self) -> bool:
+        """Validate data before saving"""
+        if st.session_state.df.empty or st.session_state.df.iloc[:, 1:].isnull().all().all():
+            st.error("❌ Cannot save: The sheet has no valid data!")
+            return False
+        return True
+
+    def perform_save(self) -> None:
+        """Perform the save operation"""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_entry = [timestamp, "Update", st.session_state.df.to_json()]
+        log_entry = {
+            "timestamp": timestamp,
+            "action": "Update",
+            "user": "System",
+            "details": json.dumps({"rows_updated": len(st.session_state.df)})
+        }
 
-        # Load workbook and save updates
-        wb = load_workbook(file_path)
-        ws_main = wb["Main"]
-        ws_log = wb["Log"]
-
-        # Save the updated main sheet
-        with pd.ExcelWriter(file_path, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
+        with pd.ExcelWriter(self.file_path, engine="openpyxl", mode="a",
+                            if_sheet_exists="replace") as writer:
             st.session_state.df.to_excel(writer, sheet_name="Main", index=False)
 
-        # Append log entry to log sheet
-        ws_log.append(log_entry)
-        wb.save(file_path)
+            # Update log
+            wb = writer.book
+            ws_log = wb["Log"]
+            ws_log.append([log_entry["timestamp"], log_entry["action"],
+                           log_entry["user"], log_entry["details"]])
 
-        st.success("Data saved successfully! Changes logged.")
+    def clear_data(self) -> None:
+        """Clear all data from the main sheet"""
+        col1, col2 = st.columns([1, 5])
+        with col1:
+            if st.button("🗑️ Clear Data"):
+                if st.session_state.df.empty:
+                    st.warning("Sheet is already empty!")
+                    return
 
-# Display the Log Sheet
-st.subheader("Change Log:")
-try:
-    df_log = pd.read_excel(file_path, sheet_name="Log", engine="openpyxl")
-    st.dataframe(df_log)
-except FileNotFoundError:
-    st.error("Log sheet not found.")
+                st.session_state.show_confirm = True
 
-# Button to clear all data from the Main sheet (leaving headers intact)
-if st.button("Clear Main Sheet"):
-    wb = load_workbook(file_path)
-    ws_main = wb["Main"]
+        if getattr(st.session_state, 'show_confirm', False):
+            st.warning("⚠️ Are you sure you want to clear all data?")
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                if st.button("Yes, clear data"):
+                    self.perform_clear()
+                    st.session_state.show_confirm = False
+                    st.rerun()
+            with col2:
+                if st.button("Cancel"):
+                    st.session_state.show_confirm = False
+                    st.rerun()
 
-    # Delete all rows except the header row
-    for row in ws_main.iter_rows(min_row=2, max_row=ws_main.max_row):
-        for cell in row:
-            cell.value = None
+    def perform_clear(self) -> None:
+        """Perform the clear operation"""
+        st.session_state.df = pd.DataFrame(columns=self.headers)
+        wb = load_workbook(self.file_path)
+        ws_main = wb["Main"]
 
-    wb.save(file_path)
-    st.success("Main sheet cleared! Only headers remain.")
+        # Keep header row and clear the rest
+        for row in ws_main.iter_rows(min_row=2, max_row=ws_main.max_row):
+            for cell in row:
+                cell.value = None
+
+        # Log the clear action
+        ws_log = wb["Log"]
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ws_log.append([timestamp, "Clear", "System", "Cleared all data"])
+        wb.save(self.file_path)
+        st.success("🧹 Data cleared successfully!")
+
+    def show_log(self) -> None:
+        """Display the change log"""
+        st.subheader("📋 Change Log")
+        try:
+            df_log = pd.read_excel(self.file_path, sheet_name="Log", engine="openpyxl")
+            st.dataframe(df_log, height=200)
+        except Exception as e:
+            st.error(f"Error loading log: {str(e)}")
+
+
+def main():
+    # Initialize session state
+    if 'trigger_rerun' not in st.session_state:
+        st.session_state.trigger_rerun = False
+
+    # Define headers
+    headers = [
+        "Account Number", "Account Name",
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    ]
+
+    # Create an instance of ExcelApp with proper initialization
+    file_path = "example.xlsx"
+    app = ExcelApp(file_path=file_path, headers=headers)
+
+    # Create sidebar with options
+    with st.sidebar:
+        st.header("Options")
+        st.markdown("---")
+        if st.button("📖 Show Instructions"):
+            st.info("""
+            **Instructions:**
+            1. Edit cells directly by clicking
+            2. Use Tab or Enter to move between cells
+            3. Add new rows using the Add Row button
+            4. Save changes using the Save button
+            5. View change history in the Log section
+            """)
+
+    # Main content area
+    app.create_grid()
+
+    # Action buttons
+    st.markdown("---")
+    app.add_new_row()
+    app.save_data()
+    app.clear_data()
+
+    # Show log at the bottom
+    st.markdown("---")
+    app.show_log()
+
+
+if __name__ == "__main__":
+    main()

@@ -47,7 +47,7 @@ class ExcelApp:
         ws_main.title = "Main"
         ws_main.append(self.headers)
         ws_log = wb.create_sheet("Log")
-        ws_log.append(["Timestamp", "Action", "User", "Details"])
+        ws_log.append(["Timestamp", "Action", "Updated Data"])
         wb.save(self.file_path)
 
     def ensure_sheets_exist(self) -> None:
@@ -58,15 +58,18 @@ class ExcelApp:
             ws_main.append(self.headers)
         if "Log" not in wb.sheetnames:
             ws_log = wb.create_sheet("Log")
-            ws_log.append(["Timestamp", "Action", "User", "Details"])
+            ws_log.append(["Timestamp", "Action", "Updated Data"])
         wb.save(self.file_path)
 
     def load_data(self) -> None:
         """Load data from Excel file into session state"""
         try:
-            df = pd.read_excel(self.file_path, sheet_name="Main", engine="openpyxl")
-            if "df" not in st.session_state:
-                st.session_state.df = df.copy()
+            if os.path.exists(self.file_path):
+                df = pd.read_excel(self.file_path, sheet_name="Main", engine="openpyxl")
+            else:
+                # Create empty DataFrame with correct columns
+                df = pd.DataFrame(columns=self.headers)
+            st.session_state.df = df
         except Exception as e:
             st.error(f"Error loading data: {str(e)}")
             st.session_state.df = pd.DataFrame(columns=self.headers)
@@ -75,123 +78,112 @@ class ExcelApp:
         """Create and configure the editable data grid"""
         st.subheader("📝 Data Editor")
 
-        # Use Streamlit's native data editor
+        # Ensure DataFrame exists with correct columns
+        if st.session_state.df.empty:
+            st.session_state.df = pd.DataFrame(columns=self.headers)
+
+        # Create the editable grid
         edited_df = st.data_editor(
             st.session_state.df,
             num_rows="dynamic",
             use_container_width=True,
-            column_config={
-                col: st.column_config.NumberColumn(col, help=f"Enter {col} value")
-                for col in self.headers[2:]  # Configure number columns for months
-            },
+            key="data_editor",
             hide_index=True,
+            column_config={
+                "Account Number": st.column_config.TextColumn(
+                    "Account Number",
+                    width="medium",
+                    required=True
+                ),
+                "Account Name": st.column_config.TextColumn(
+                    "Account Name",
+                    width="medium",
+                    required=True
+                ),
+                **{
+                    month: st.column_config.NumberColumn(
+                        month,
+                        width="small",
+                        format="%.2f",
+                        min_value=0,
+                        required=False
+                    )
+                    for month in self.headers[2:]  # All month columns
+                }
+            }
         )
 
         if edited_df is not None:
-            st.session_state.df = edited_df.copy()
+            st.session_state.df = edited_df
 
     def add_new_row(self) -> None:
         """Add a new empty row to the dataframe"""
-        col1, col2 = st.columns([1, 5])
-        with col1:
-            if st.button("➕ Add Row"):
-                new_row = pd.DataFrame([{col: None for col in st.session_state.df.columns}])
-                st.session_state.df = pd.concat([st.session_state.df, new_row], ignore_index=True)
-                st.rerun()
+        if st.button("➕ Add Row"):
+            empty_row = pd.DataFrame([[None] * len(self.headers)], columns=self.headers)
+            st.session_state.df = pd.concat([st.session_state.df, empty_row], ignore_index=True)
+            st.rerun()
 
     def save_data(self) -> None:
         """Save data to Excel file"""
-        col1, col2 = st.columns([1, 5])
-        with col1:
-            if st.button("💾 Save"):
-                if self.validate_data_for_save():
-                    self.perform_save()
-                    st.success("✅ Data saved successfully!")
+        if st.button("💾 Save"):
+            if self.validate_data_for_save():
+                self.perform_save()
+                st.success("✅ Data saved successfully!")
 
     def validate_data_for_save(self) -> bool:
         """Validate data before saving"""
-        if st.session_state.df.empty or st.session_state.df.iloc[:, 1:].isnull().all().all():
-            st.error("❌ Cannot save: The sheet has no valid data!")
+        if st.session_state.df.empty:
+            st.error("❌ Cannot save: The sheet has no data!")
             return False
         return True
 
     def perform_save(self) -> None:
         """Perform the save operation"""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_entry = {
-            "timestamp": timestamp,
-            "action": "Update",
-            "user": "System",
-            "details": json.dumps({"rows_updated": len(st.session_state.df)})
-        }
+        try:
+            with pd.ExcelWriter(self.file_path, engine="openpyxl", mode="a",
+                                if_sheet_exists="replace") as writer:
+                st.session_state.df.to_excel(writer, sheet_name="Main", index=False)
 
-        with pd.ExcelWriter(self.file_path, engine="openpyxl", mode="a",
-                            if_sheet_exists="replace") as writer:
-            st.session_state.df.to_excel(writer, sheet_name="Main", index=False)
+                # Log the save action
+                log_df = pd.DataFrame({
+                    "Timestamp": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
+                    "Action": ["Update"],
+                    "Updated Data": [str(st.session_state.df.to_dict())]
+                })
 
-            # Update log
-            wb = writer.book
-            ws_log = wb["Log"]
-            ws_log.append([log_entry["timestamp"], log_entry["action"],
-                           log_entry["user"], log_entry["details"]])
+                # If Log sheet exists, read it and append
+                try:
+                    existing_log = pd.read_excel(self.file_path, sheet_name="Log")
+                    log_df = pd.concat([existing_log, log_df], ignore_index=True)
+                except:
+                    pass
+
+                log_df.to_excel(writer, sheet_name="Log", index=False)
+        except Exception as e:
+            st.error(f"Error saving data: {str(e)}")
 
     def clear_data(self) -> None:
         """Clear all data from the main sheet"""
-        col1, col2 = st.columns([1, 5])
-        with col1:
-            if st.button("🗑️ Clear Data"):
-                if st.session_state.df.empty:
-                    st.warning("Sheet is already empty!")
-                    return
+        if st.button("🗑️ Clear Data"):
+            if st.session_state.df.empty:
+                st.warning("Sheet is already empty!")
+                return
 
-                st.session_state.show_confirm = True
-
-        if getattr(st.session_state, 'show_confirm', False):
-            st.warning("⚠️ Are you sure you want to clear all data?")
-            col1, col2 = st.columns([1, 1])
-            with col1:
-                if st.button("Yes, clear data"):
-                    self.perform_clear()
-                    st.session_state.show_confirm = False
-                    st.rerun()
-            with col2:
-                if st.button("Cancel"):
-                    st.session_state.show_confirm = False
-                    st.rerun()
-
-    def perform_clear(self) -> None:
-        """Perform the clear operation"""
-        st.session_state.df = pd.DataFrame(columns=self.headers)
-        wb = load_workbook(self.file_path)
-        ws_main = wb["Main"]
-
-        # Keep header row and clear the rest
-        for row in ws_main.iter_rows(min_row=2, max_row=ws_main.max_row):
-            for cell in row:
-                cell.value = None
-
-        # Log the clear action
-        ws_log = wb["Log"]
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        ws_log.append([timestamp, "Clear", "System", "Cleared all data"])
-        wb.save(self.file_path)
-        st.success("🧹 Data cleared successfully!")
+            st.session_state.df = pd.DataFrame(columns=self.headers)
+            self.perform_save()
+            st.success("🧹 Data cleared successfully!")
 
     def show_log(self) -> None:
         """Display the change log"""
         st.subheader("📋 Change Log")
         try:
-            df_log = pd.read_excel(self.file_path, sheet_name="Log", engine="openpyxl")
+            df_log = pd.read_excel(self.file_path, sheet_name="Log")
             st.dataframe(df_log, height=200)
         except Exception as e:
             st.error(f"Error loading log: {str(e)}")
 
 
 def main():
-    # Initialize session state
-    if 'trigger_rerun' not in st.session_state:
-        st.session_state.trigger_rerun = False
-
     # Define headers
     headers = [
         "Account Number", "Account Name",
@@ -199,7 +191,7 @@ def main():
         "July", "August", "September", "October", "November", "December"
     ]
 
-    # Create an instance of ExcelApp with proper initialization
+    # Create an instance of ExcelApp
     file_path = "example.xlsx"
     app = ExcelApp(file_path=file_path, headers=headers)
 
